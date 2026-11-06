@@ -1,0 +1,5 @@
+# Diretrizes de Otimização e Roadmap
+1. Contexto do Projeto: Antes de agir, consulte o @STATUS.md (ou arquivo de Roadmap na pasta .plans/) apenas para identificar: o que foi concluído, a etapa atual e a primeira sub-tarefa pendente.
+2. Escopo Estrito: Foque exclusivamente nessa próxima sub-tarefa. Não leia pastas inteiras nem arquivos fora do escopo da tarefa.
+3. Fluxo Atômico: Implemente as alterações necessárias no código e atualize o @STATUS.md marcando o item como concluído.
+4. Concisão: Sem explicações teóricas longas. Execute o código, atualize o STATUS e pare.

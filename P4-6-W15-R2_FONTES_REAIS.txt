@@ -1,0 +1,3516 @@
+﻿============================================================
+P4.6-W15-R2 - FONTES REAIS PARA EXECUTOR E2E COMPRAS
+GERADO: 2026-09-01 11:07:46
+============================================================
+
+============================================================
+FILE: C:\Users\pc_fa\Documents\Projeto_GPT_Plus\.auditoria\F04\F04.2_pre_fundacao_20260816_185226\comprasService.js
+============================================================
+import { v4 as uuidv4 } from './uuid.js';
+import { DEFAULT_STORE } from '../data/models.js';
+import { saveToStorage } from './storage.js';
+
+export function createComprasService(store) {
+  const data = store || { ...DEFAULT_STORE };
+
+  function list() {
+    return data.compras || [];
+  }
+
+  function getById(id) {
+    return list().find(item => item.id === id) || null;
+  }
+
+  function create(payload) {
+    const compra = {
+      id: payload.id || uuidv4(),
+      fornecedorId: payload.fornecedorId || null,
+      data: payload.data || new Date().toISOString().slice(0, 10),
+      valor: Number(payload.valor || 0),
+      status: payload.status || 'pendente',
+      lancamentoFinanceiroId: payload.lancamentoFinanceiroId || null,
+      atualizadoEm: new Date().toISOString(),
+    };
+
+    data.compras = [...list(), compra];
+    persist();
+    return compra;
+  }
+
+  function update(id, updates) {
+    data.compras = list().map(item => {
+      if (item.id !== id) return item;
+      return {
+        ...item,
+        ...updates,
+        valor: updates.valor !== undefined ? Number(updates.valor) : item.valor,
+        atualizadoEm: new Date().toISOString(),
+      };
+    });
+    persist();
+    return getById(id);
+  }
+
+  function remove(id) {
+    data.compras = list().filter(item => item.id !== id);
+    persist();
+  }
+
+  function vincularLancamentoFinanceiro(compraId, lancamentoId) {
+    const index = list().findIndex(item => item.id === compraId);
+
+    if (index === -1) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    data.compras[index] = {
+      ...data.compras[index],
+      lancamentoFinanceiroId: lancamentoId,
+      atualizadoEm: new Date().toISOString(),
+    };
+
+    persist();
+
+    return {
+      sucesso: true,
+      compra: data.compras[index],
+    };
+  }
+
+  function desvincularLancamentoFinanceiro(compraId) {
+    const index = list().findIndex(item => item.id === compraId);
+
+    if (index === -1) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    data.compras[index] = {
+      ...data.compras[index],
+      lancamentoFinanceiroId: null,
+      atualizadoEm: new Date().toISOString(),
+    };
+
+    persist();
+
+    return {
+      sucesso: true,
+      compra: data.compras[index],
+    };
+  }
+  function persist() {
+    saveToStorage({
+      compras: data.compras || [],
+    });
+  }
+
+  return {
+    list,
+    getById,
+    create,
+    update,
+    remove,
+    vincularLancamentoFinanceiro,
+    desvincularLancamentoFinanceiro,
+  };
+}
+
+============================================================
+FILE: C:\Users\pc_fa\Documents\Projeto_GPT_Plus\.auditoria\ModeloMestre\MIGRACAO_J0_20260826_190929\bundle\src\services\comprasService.js
+============================================================
+import { v4 as uuidv4 } from './uuid.js';
+import { saveToStorage } from './storage.js';
+
+function numero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function createComprasService(data) {
+  if (!Array.isArray(data.compras)) {
+    data.compras = [];
+  }
+
+  function list() {
+    return data.compras;
+  }
+
+  function getById(id) {
+    return list().find(
+      item => String(item.id) === String(id)
+    ) || null;
+  }
+
+  function validar(payload = {}) {
+    const erros = [];
+
+    if (!payload.fornecedorId) {
+      erros.push('Fornecedor Ã© obrigatÃ³rio');
+    }
+
+    if (!payload.data) {
+      erros.push('Data Ã© obrigatÃ³ria');
+    }
+
+    if (
+      !Array.isArray(payload.itens) ||
+      payload.itens.length === 0
+    ) {
+      erros.push('Adicione pelo menos um item');
+    }
+
+    (payload.itens || []).forEach((item, index) => {
+      if (!item.insumoId) {
+        erros.push(`Item ${index + 1}: Insumo obrigatÃ³rio`);
+      }
+
+      if (!numero(item.quantidade) || numero(item.quantidade) <= 0) {
+        erros.push(`Item ${index + 1}: Quantidade invÃ¡lida`);
+      }
+
+      const preco =
+        item.precoUnitario !== undefined
+          ? numero(item.precoUnitario)
+          : numero(item.valorUnitario);
+
+      if (preco < 0) {
+        erros.push(`Item ${index + 1}: PreÃ§o invÃ¡lido`);
+      }
+    });
+
+    return erros;
+  }
+
+  function recalcularItem(item = {}) {
+    const quantidade = numero(item.quantidade);
+
+    const precoUnitario =
+      item.precoUnitario !== undefined
+        ? numero(item.precoUnitario)
+        : numero(item.valorUnitario);
+
+    const descontoValor =
+      Math.max(0, numero(item.descontoValor));
+
+    const descontoUnitario =
+      descontoValor > 0 && quantidade > 0
+        ? descontoValor / quantidade
+        : 0;
+
+    const precoUnitarioLiquido =
+      Math.round(
+        (precoUnitario - descontoUnitario) * 1000000
+      ) / 1000000;
+
+    const subtotal =
+      Math.round(
+        quantidade * precoUnitarioLiquido * 100
+      ) / 100;
+
+    const mapped = {
+      insumoId: item.insumoId || null,
+      quantidade,
+      precoUnitario,
+      descontoValor,
+      precoUnitarioLiquido,
+      subtotal,
+
+      // Compatibilidade temporÃ¡ria.
+      valorUnitario: precoUnitario,
+    };
+
+    if (numero(item.precoEmbalagem) > 0) {
+      mapped.precoEmbalagem = numero(item.precoEmbalagem);
+    }
+
+    if (numero(item.qtdEmbalagens) > 0) {
+      mapped.qtdEmbalagens = numero(item.qtdEmbalagens);
+    }
+
+    return mapped;
+  }
+
+  function normalizeItems(items = []) {
+    if (!Array.isArray(items)) return [];
+
+    return items
+      .map(recalcularItem)
+      .filter(item =>
+        item.insumoId &&
+        item.quantidade > 0
+      );
+  }
+
+  function calcularTotal(items = []) {
+    return normalizeItems(items).reduce(
+      (total, item) => total + numero(item.subtotal),
+      0
+    );
+  }
+
+  function calculateTotal(items = []) {
+    return calcularTotal(items);
+  }
+
+  function create(payload = {}) {
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    const compra = {
+      id: payload.id || uuidv4(),
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+
+      // Compatibilidade com Financeiro/modular anterior.
+      valor: total,
+
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      status: 'pendente',
+      lancamentoFinanceiroId: null,
+      recebimentoEstoqueId: null,
+      criadoEm: new Date().toISOString(),
+    };
+
+    data.compras.push(compra);
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function update(id, payload = {}) {
+    const index = list().findIndex(
+      item => String(item.id) === String(id)
+    );
+
+    if (index === -1) {
+      return {
+        sucesso: false,
+        erros: ['Compra nÃ£o encontrada'],
+      };
+    }
+
+    const atual = data.compras[index];
+
+    if (atual.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erros: ['Apenas compras pendentes podem ser editadas'],
+      };
+    }
+
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    data.compras[index] = {
+      ...atual,
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+      valor: total,
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      atualizadoEm: new Date().toISOString(),
+    };
+
+    persist();
+
+    return {
+      sucesso: true,
+      compra: data.compras[index],
+    };
+  }
+
+  function remove(id) {
+    const compra = getById(id);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras pendentes podem ser removidas',
+      };
+    }
+
+    data.compras = list().filter(
+      item => String(item.id) !== String(id)
+    );
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function receberCompra(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Esta compra jÃ¡ foi processada',
+      };
+    }
+
+    const executadas = [];
+
+    for (const item of compra.itens) {
+      const resultado =
+        estoqueService.registrarEntrada({
+          insumoId: item.insumoId,
+          quantidade: item.quantidade,
+          custoUnitario:
+            item.precoUnitarioLiquido ??
+            item.precoUnitario,
+          origem: 'compra',
+          referenciaId: compraId,
+        });
+
+      if (!resultado.ok) {
+        estoqueService
+          .removerEntradasDaCompra(compraId);
+
+        return {
+          sucesso: false,
+          erro: `Erro no estoque: ${resultado.erro}`,
+        };
+      }
+
+      executadas.push(resultado);
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'recebida';
+    data.compras[index].dataRecebimento =
+      new Date().toISOString();
+
+    // Compatibilidade temporÃ¡ria.
+    data.compras[index].recebimentoEstoqueId = compraId;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function estornarRecebimento(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'recebida') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras recebidas podem ser estornadas',
+      };
+    }
+
+    const resultado =
+      estoqueService.removerEntradasDaCompra(compraId);
+
+    if (!resultado.sucesso) {
+      return resultado;
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'pendente';
+    data.compras[index].recebimentoEstoqueId = null;
+
+    delete data.compras[index].dataRecebimento;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function vincularLancamentoFinanceiro(compraId, lancamentoId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = lancamentoId;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function desvincularLancamentoFinanceiro(compraId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = null;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function persist() {
+    saveToStorage({
+      compras: data.compras,
+    });
+  }
+
+  return {
+    list,
+    getById,
+    validar,
+    recalcularItem,
+    normalizeItems,
+    calcularTotal,
+    calculateTotal,
+    create,
+    update,
+    remove,
+    receberCompra,
+    estornarRecebimento,
+    vincularLancamentoFinanceiro,
+    desvincularLancamentoFinanceiro,
+  };
+}
+
+============================================================
+FILE: C:\Users\pc_fa\Documents\Projeto_GPT_Plus\.auditoria\PosRelease\P4_3C_20260827_204252\deploy\services\comprasService.js
+============================================================
+import { v4 as uuidv4 } from './uuid.js';
+import { saveToStorage } from './storage.js';
+
+function numero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function createComprasService(data) {
+  if (!Array.isArray(data.compras)) {
+    data.compras = [];
+  }
+
+  function list() {
+    return data.compras;
+  }
+
+  function getById(id) {
+    return list().find(
+      item => String(item.id) === String(id)
+    ) || null;
+  }
+
+  function validar(payload = {}) {
+    const erros = [];
+
+    if (!payload.fornecedorId) {
+      erros.push('Fornecedor Ã© obrigatÃ³rio');
+    }
+
+    if (!payload.data) {
+      erros.push('Data Ã© obrigatÃ³ria');
+    }
+
+    if (
+      !Array.isArray(payload.itens) ||
+      payload.itens.length === 0
+    ) {
+      erros.push('Adicione pelo menos um item');
+    }
+
+    (payload.itens || []).forEach((item, index) => {
+      if (!item.insumoId) {
+        erros.push(`Item ${index + 1}: Insumo obrigatÃ³rio`);
+      }
+
+      if (!numero(item.quantidade) || numero(item.quantidade) <= 0) {
+        erros.push(`Item ${index + 1}: Quantidade invÃ¡lida`);
+      }
+
+      const preco =
+        item.precoUnitario !== undefined
+          ? numero(item.precoUnitario)
+          : numero(item.valorUnitario);
+
+      if (preco < 0) {
+        erros.push(`Item ${index + 1}: PreÃ§o invÃ¡lido`);
+      }
+    });
+
+    return erros;
+  }
+
+  function recalcularItem(item = {}) {
+    const quantidade = numero(item.quantidade);
+
+    const precoUnitario =
+      item.precoUnitario !== undefined
+        ? numero(item.precoUnitario)
+        : numero(item.valorUnitario);
+
+    const descontoValor =
+      Math.max(0, numero(item.descontoValor));
+
+    const descontoUnitario =
+      descontoValor > 0 && quantidade > 0
+        ? descontoValor / quantidade
+        : 0;
+
+    const precoUnitarioLiquido =
+      Math.round(
+        (precoUnitario - descontoUnitario) * 1000000
+      ) / 1000000;
+
+    const subtotal =
+      Math.round(
+        quantidade * precoUnitarioLiquido * 100
+      ) / 100;
+
+    const mapped = {
+      insumoId: item.insumoId || null,
+      quantidade,
+      precoUnitario,
+      descontoValor,
+      precoUnitarioLiquido,
+      subtotal,
+
+      // Compatibilidade temporÃ¡ria.
+      valorUnitario: precoUnitario,
+    };
+
+    if (numero(item.precoEmbalagem) > 0) {
+      mapped.precoEmbalagem = numero(item.precoEmbalagem);
+    }
+
+    if (numero(item.qtdEmbalagens) > 0) {
+      mapped.qtdEmbalagens = numero(item.qtdEmbalagens);
+    }
+
+    return mapped;
+  }
+
+  function normalizeItems(items = []) {
+    if (!Array.isArray(items)) return [];
+
+    return items
+      .map(recalcularItem)
+      .filter(item =>
+        item.insumoId &&
+        item.quantidade > 0
+      );
+  }
+
+  function calcularTotal(items = []) {
+    return normalizeItems(items).reduce(
+      (total, item) => total + numero(item.subtotal),
+      0
+    );
+  }
+
+  function calculateTotal(items = []) {
+    return calcularTotal(items);
+  }
+
+  function create(payload = {}) {
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    const compra = {
+      id: payload.id || uuidv4(),
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+
+      // Compatibilidade com Financeiro/modular anterior.
+      valor: total,
+
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      status: 'pendente',
+      lancamentoFinanceiroId: null,
+      recebimentoEstoqueId: null,
+      criadoEm: new Date().toISOString(),
+    };
+
+    data.compras.push(compra);
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function update(id, payload = {}) {
+    const index = list().findIndex(
+      item => String(item.id) === String(id)
+    );
+
+    if (index === -1) {
+      return {
+        sucesso: false,
+        erros: ['Compra nÃ£o encontrada'],
+      };
+    }
+
+    const atual = data.compras[index];
+
+    if (atual.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erros: ['Apenas compras pendentes podem ser editadas'],
+      };
+    }
+
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    data.compras[index] = {
+      ...atual,
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+      valor: total,
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      atualizadoEm: new Date().toISOString(),
+    };
+
+    persist();
+
+    return {
+      sucesso: true,
+      compra: data.compras[index],
+    };
+  }
+
+  function remove(id) {
+    const compra = getById(id);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras pendentes podem ser removidas',
+      };
+    }
+
+    data.compras = list().filter(
+      item => String(item.id) !== String(id)
+    );
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function receberCompra(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Esta compra jÃ¡ foi processada',
+      };
+    }
+
+    const executadas = [];
+
+    for (const item of compra.itens) {
+      const resultado =
+        estoqueService.registrarEntrada({
+          insumoId: item.insumoId,
+          quantidade: item.quantidade,
+          custoUnitario:
+            item.precoUnitarioLiquido ??
+            item.precoUnitario,
+          origem: 'compra',
+          referenciaId: compraId,
+        });
+
+      if (!resultado.ok) {
+        estoqueService
+          .removerEntradasDaCompra(compraId);
+
+        return {
+          sucesso: false,
+          erro: `Erro no estoque: ${resultado.erro}`,
+        };
+      }
+
+      executadas.push(resultado);
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'recebida';
+    data.compras[index].dataRecebimento =
+      new Date().toISOString();
+
+    // Compatibilidade temporÃ¡ria.
+    data.compras[index].recebimentoEstoqueId = compraId;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function estornarRecebimento(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'recebida') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras recebidas podem ser estornadas',
+      };
+    }
+
+    const resultado =
+      estoqueService.removerEntradasDaCompra(compraId);
+
+    if (!resultado.sucesso) {
+      return resultado;
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'pendente';
+    data.compras[index].recebimentoEstoqueId = null;
+
+    delete data.compras[index].dataRecebimento;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function vincularLancamentoFinanceiro(compraId, lancamentoId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = lancamentoId;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function desvincularLancamentoFinanceiro(compraId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = null;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function persist() {
+    saveToStorage({
+      compras: data.compras,
+    });
+  }
+
+  return {
+    list,
+    getById,
+    validar,
+    recalcularItem,
+    normalizeItems,
+    calcularTotal,
+    calculateTotal,
+    create,
+    update,
+    remove,
+    receberCompra,
+    estornarRecebimento,
+    vincularLancamentoFinanceiro,
+    desvincularLancamentoFinanceiro,
+  };
+}
+
+============================================================
+FILE: C:\Users\pc_fa\Documents\Projeto_GPT_Plus\.auditoria\PosRelease\P4_3C_20260827_204653\deploy\services\comprasService.js
+============================================================
+import { v4 as uuidv4 } from './uuid.js';
+import { saveToStorage } from './storage.js';
+
+function numero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function createComprasService(data) {
+  if (!Array.isArray(data.compras)) {
+    data.compras = [];
+  }
+
+  function list() {
+    return data.compras;
+  }
+
+  function getById(id) {
+    return list().find(
+      item => String(item.id) === String(id)
+    ) || null;
+  }
+
+  function validar(payload = {}) {
+    const erros = [];
+
+    if (!payload.fornecedorId) {
+      erros.push('Fornecedor Ã© obrigatÃ³rio');
+    }
+
+    if (!payload.data) {
+      erros.push('Data Ã© obrigatÃ³ria');
+    }
+
+    if (
+      !Array.isArray(payload.itens) ||
+      payload.itens.length === 0
+    ) {
+      erros.push('Adicione pelo menos um item');
+    }
+
+    (payload.itens || []).forEach((item, index) => {
+      if (!item.insumoId) {
+        erros.push(`Item ${index + 1}: Insumo obrigatÃ³rio`);
+      }
+
+      if (!numero(item.quantidade) || numero(item.quantidade) <= 0) {
+        erros.push(`Item ${index + 1}: Quantidade invÃ¡lida`);
+      }
+
+      const preco =
+        item.precoUnitario !== undefined
+          ? numero(item.precoUnitario)
+          : numero(item.valorUnitario);
+
+      if (preco < 0) {
+        erros.push(`Item ${index + 1}: PreÃ§o invÃ¡lido`);
+      }
+    });
+
+    return erros;
+  }
+
+  function recalcularItem(item = {}) {
+    const quantidade = numero(item.quantidade);
+
+    const precoUnitario =
+      item.precoUnitario !== undefined
+        ? numero(item.precoUnitario)
+        : numero(item.valorUnitario);
+
+    const descontoValor =
+      Math.max(0, numero(item.descontoValor));
+
+    const descontoUnitario =
+      descontoValor > 0 && quantidade > 0
+        ? descontoValor / quantidade
+        : 0;
+
+    const precoUnitarioLiquido =
+      Math.round(
+        (precoUnitario - descontoUnitario) * 1000000
+      ) / 1000000;
+
+    const subtotal =
+      Math.round(
+        quantidade * precoUnitarioLiquido * 100
+      ) / 100;
+
+    const mapped = {
+      insumoId: item.insumoId || null,
+      quantidade,
+      precoUnitario,
+      descontoValor,
+      precoUnitarioLiquido,
+      subtotal,
+
+      // Compatibilidade temporÃ¡ria.
+      valorUnitario: precoUnitario,
+    };
+
+    if (numero(item.precoEmbalagem) > 0) {
+      mapped.precoEmbalagem = numero(item.precoEmbalagem);
+    }
+
+    if (numero(item.qtdEmbalagens) > 0) {
+      mapped.qtdEmbalagens = numero(item.qtdEmbalagens);
+    }
+
+    return mapped;
+  }
+
+  function normalizeItems(items = []) {
+    if (!Array.isArray(items)) return [];
+
+    return items
+      .map(recalcularItem)
+      .filter(item =>
+        item.insumoId &&
+        item.quantidade > 0
+      );
+  }
+
+  function calcularTotal(items = []) {
+    return normalizeItems(items).reduce(
+      (total, item) => total + numero(item.subtotal),
+      0
+    );
+  }
+
+  function calculateTotal(items = []) {
+    return calcularTotal(items);
+  }
+
+  function create(payload = {}) {
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    const compra = {
+      id: payload.id || uuidv4(),
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+
+      // Compatibilidade com Financeiro/modular anterior.
+      valor: total,
+
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      status: 'pendente',
+      lancamentoFinanceiroId: null,
+      recebimentoEstoqueId: null,
+      criadoEm: new Date().toISOString(),
+    };
+
+    data.compras.push(compra);
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function update(id, payload = {}) {
+    const index = list().findIndex(
+      item => String(item.id) === String(id)
+    );
+
+    if (index === -1) {
+      return {
+        sucesso: false,
+        erros: ['Compra nÃ£o encontrada'],
+      };
+    }
+
+    const atual = data.compras[index];
+
+    if (atual.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erros: ['Apenas compras pendentes podem ser editadas'],
+      };
+    }
+
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    data.compras[index] = {
+      ...atual,
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+      valor: total,
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      atualizadoEm: new Date().toISOString(),
+    };
+
+    persist();
+
+    return {
+      sucesso: true,
+      compra: data.compras[index],
+    };
+  }
+
+  function remove(id) {
+    const compra = getById(id);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras pendentes podem ser removidas',
+      };
+    }
+
+    data.compras = list().filter(
+      item => String(item.id) !== String(id)
+    );
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function receberCompra(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Esta compra jÃ¡ foi processada',
+      };
+    }
+
+    const executadas = [];
+
+    for (const item of compra.itens) {
+      const resultado =
+        estoqueService.registrarEntrada({
+          insumoId: item.insumoId,
+          quantidade: item.quantidade,
+          custoUnitario:
+            item.precoUnitarioLiquido ??
+            item.precoUnitario,
+          origem: 'compra',
+          referenciaId: compraId,
+        });
+
+      if (!resultado.ok) {
+        estoqueService
+          .removerEntradasDaCompra(compraId);
+
+        return {
+          sucesso: false,
+          erro: `Erro no estoque: ${resultado.erro}`,
+        };
+      }
+
+      executadas.push(resultado);
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'recebida';
+    data.compras[index].dataRecebimento =
+      new Date().toISOString();
+
+    // Compatibilidade temporÃ¡ria.
+    data.compras[index].recebimentoEstoqueId = compraId;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function estornarRecebimento(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'recebida') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras recebidas podem ser estornadas',
+      };
+    }
+
+    const resultado =
+      estoqueService.removerEntradasDaCompra(compraId);
+
+    if (!resultado.sucesso) {
+      return resultado;
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'pendente';
+    data.compras[index].recebimentoEstoqueId = null;
+
+    delete data.compras[index].dataRecebimento;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function vincularLancamentoFinanceiro(compraId, lancamentoId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = lancamentoId;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function desvincularLancamentoFinanceiro(compraId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = null;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function persist() {
+    saveToStorage({
+      compras: data.compras,
+    });
+  }
+
+  return {
+    list,
+    getById,
+    validar,
+    recalcularItem,
+    normalizeItems,
+    calcularTotal,
+    calculateTotal,
+    create,
+    update,
+    remove,
+    receberCompra,
+    estornarRecebimento,
+    vincularLancamentoFinanceiro,
+    desvincularLancamentoFinanceiro,
+  };
+}
+
+============================================================
+FILE: C:\Users\pc_fa\Documents\Projeto_GPT_Plus\.auditoria\PosRelease\P4_3C_20260827_205449\deploy\services\comprasService.js
+============================================================
+import { v4 as uuidv4 } from './uuid.js';
+import { saveToStorage } from './storage.js';
+
+function numero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function createComprasService(data) {
+  if (!Array.isArray(data.compras)) {
+    data.compras = [];
+  }
+
+  function list() {
+    return data.compras;
+  }
+
+  function getById(id) {
+    return list().find(
+      item => String(item.id) === String(id)
+    ) || null;
+  }
+
+  function validar(payload = {}) {
+    const erros = [];
+
+    if (!payload.fornecedorId) {
+      erros.push('Fornecedor Ã© obrigatÃ³rio');
+    }
+
+    if (!payload.data) {
+      erros.push('Data Ã© obrigatÃ³ria');
+    }
+
+    if (
+      !Array.isArray(payload.itens) ||
+      payload.itens.length === 0
+    ) {
+      erros.push('Adicione pelo menos um item');
+    }
+
+    (payload.itens || []).forEach((item, index) => {
+      if (!item.insumoId) {
+        erros.push(`Item ${index + 1}: Insumo obrigatÃ³rio`);
+      }
+
+      if (!numero(item.quantidade) || numero(item.quantidade) <= 0) {
+        erros.push(`Item ${index + 1}: Quantidade invÃ¡lida`);
+      }
+
+      const preco =
+        item.precoUnitario !== undefined
+          ? numero(item.precoUnitario)
+          : numero(item.valorUnitario);
+
+      if (preco < 0) {
+        erros.push(`Item ${index + 1}: PreÃ§o invÃ¡lido`);
+      }
+    });
+
+    return erros;
+  }
+
+  function recalcularItem(item = {}) {
+    const quantidade = numero(item.quantidade);
+
+    const precoUnitario =
+      item.precoUnitario !== undefined
+        ? numero(item.precoUnitario)
+        : numero(item.valorUnitario);
+
+    const descontoValor =
+      Math.max(0, numero(item.descontoValor));
+
+    const descontoUnitario =
+      descontoValor > 0 && quantidade > 0
+        ? descontoValor / quantidade
+        : 0;
+
+    const precoUnitarioLiquido =
+      Math.round(
+        (precoUnitario - descontoUnitario) * 1000000
+      ) / 1000000;
+
+    const subtotal =
+      Math.round(
+        quantidade * precoUnitarioLiquido * 100
+      ) / 100;
+
+    const mapped = {
+      insumoId: item.insumoId || null,
+      quantidade,
+      precoUnitario,
+      descontoValor,
+      precoUnitarioLiquido,
+      subtotal,
+
+      // Compatibilidade temporÃ¡ria.
+      valorUnitario: precoUnitario,
+    };
+
+    if (numero(item.precoEmbalagem) > 0) {
+      mapped.precoEmbalagem = numero(item.precoEmbalagem);
+    }
+
+    if (numero(item.qtdEmbalagens) > 0) {
+      mapped.qtdEmbalagens = numero(item.qtdEmbalagens);
+    }
+
+    return mapped;
+  }
+
+  function normalizeItems(items = []) {
+    if (!Array.isArray(items)) return [];
+
+    return items
+      .map(recalcularItem)
+      .filter(item =>
+        item.insumoId &&
+        item.quantidade > 0
+      );
+  }
+
+  function calcularTotal(items = []) {
+    return normalizeItems(items).reduce(
+      (total, item) => total + numero(item.subtotal),
+      0
+    );
+  }
+
+  function calculateTotal(items = []) {
+    return calcularTotal(items);
+  }
+
+  function create(payload = {}) {
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    const compra = {
+      id: payload.id || uuidv4(),
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+
+      // Compatibilidade com Financeiro/modular anterior.
+      valor: total,
+
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      status: 'pendente',
+      lancamentoFinanceiroId: null,
+      recebimentoEstoqueId: null,
+      criadoEm: new Date().toISOString(),
+    };
+
+    data.compras.push(compra);
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function update(id, payload = {}) {
+    const index = list().findIndex(
+      item => String(item.id) === String(id)
+    );
+
+    if (index === -1) {
+      return {
+        sucesso: false,
+        erros: ['Compra nÃ£o encontrada'],
+      };
+    }
+
+    const atual = data.compras[index];
+
+    if (atual.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erros: ['Apenas compras pendentes podem ser editadas'],
+      };
+    }
+
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    data.compras[index] = {
+      ...atual,
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+      valor: total,
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      atualizadoEm: new Date().toISOString(),
+    };
+
+    persist();
+
+    return {
+      sucesso: true,
+      compra: data.compras[index],
+    };
+  }
+
+  function remove(id) {
+    const compra = getById(id);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras pendentes podem ser removidas',
+      };
+    }
+
+    data.compras = list().filter(
+      item => String(item.id) !== String(id)
+    );
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function receberCompra(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Esta compra jÃ¡ foi processada',
+      };
+    }
+
+    const executadas = [];
+
+    for (const item of compra.itens) {
+      const resultado =
+        estoqueService.registrarEntrada({
+          insumoId: item.insumoId,
+          quantidade: item.quantidade,
+          custoUnitario:
+            item.precoUnitarioLiquido ??
+            item.precoUnitario,
+          origem: 'compra',
+          referenciaId: compraId,
+        });
+
+      if (!resultado.ok) {
+        estoqueService
+          .removerEntradasDaCompra(compraId);
+
+        return {
+          sucesso: false,
+          erro: `Erro no estoque: ${resultado.erro}`,
+        };
+      }
+
+      executadas.push(resultado);
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'recebida';
+    data.compras[index].dataRecebimento =
+      new Date().toISOString();
+
+    // Compatibilidade temporÃ¡ria.
+    data.compras[index].recebimentoEstoqueId = compraId;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function estornarRecebimento(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'recebida') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras recebidas podem ser estornadas',
+      };
+    }
+
+    const resultado =
+      estoqueService.removerEntradasDaCompra(compraId);
+
+    if (!resultado.sucesso) {
+      return resultado;
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'pendente';
+    data.compras[index].recebimentoEstoqueId = null;
+
+    delete data.compras[index].dataRecebimento;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function vincularLancamentoFinanceiro(compraId, lancamentoId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = lancamentoId;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function desvincularLancamentoFinanceiro(compraId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = null;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function persist() {
+    saveToStorage({
+      compras: data.compras,
+    });
+  }
+
+  return {
+    list,
+    getById,
+    validar,
+    recalcularItem,
+    normalizeItems,
+    calcularTotal,
+    calculateTotal,
+    create,
+    update,
+    remove,
+    receberCompra,
+    estornarRecebimento,
+    vincularLancamentoFinanceiro,
+    desvincularLancamentoFinanceiro,
+  };
+}
+
+============================================================
+FILE: C:\Users\pc_fa\Documents\Projeto_GPT_Plus\.auditoria\PosRelease\P4_3C_20260827_205934\deploy\services\comprasService.js
+============================================================
+import { v4 as uuidv4 } from './uuid.js';
+import { saveToStorage } from './storage.js';
+
+function numero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function createComprasService(data) {
+  if (!Array.isArray(data.compras)) {
+    data.compras = [];
+  }
+
+  function list() {
+    return data.compras;
+  }
+
+  function getById(id) {
+    return list().find(
+      item => String(item.id) === String(id)
+    ) || null;
+  }
+
+  function validar(payload = {}) {
+    const erros = [];
+
+    if (!payload.fornecedorId) {
+      erros.push('Fornecedor Ã© obrigatÃ³rio');
+    }
+
+    if (!payload.data) {
+      erros.push('Data Ã© obrigatÃ³ria');
+    }
+
+    if (
+      !Array.isArray(payload.itens) ||
+      payload.itens.length === 0
+    ) {
+      erros.push('Adicione pelo menos um item');
+    }
+
+    (payload.itens || []).forEach((item, index) => {
+      if (!item.insumoId) {
+        erros.push(`Item ${index + 1}: Insumo obrigatÃ³rio`);
+      }
+
+      if (!numero(item.quantidade) || numero(item.quantidade) <= 0) {
+        erros.push(`Item ${index + 1}: Quantidade invÃ¡lida`);
+      }
+
+      const preco =
+        item.precoUnitario !== undefined
+          ? numero(item.precoUnitario)
+          : numero(item.valorUnitario);
+
+      if (preco < 0) {
+        erros.push(`Item ${index + 1}: PreÃ§o invÃ¡lido`);
+      }
+    });
+
+    return erros;
+  }
+
+  function recalcularItem(item = {}) {
+    const quantidade = numero(item.quantidade);
+
+    const precoUnitario =
+      item.precoUnitario !== undefined
+        ? numero(item.precoUnitario)
+        : numero(item.valorUnitario);
+
+    const descontoValor =
+      Math.max(0, numero(item.descontoValor));
+
+    const descontoUnitario =
+      descontoValor > 0 && quantidade > 0
+        ? descontoValor / quantidade
+        : 0;
+
+    const precoUnitarioLiquido =
+      Math.round(
+        (precoUnitario - descontoUnitario) * 1000000
+      ) / 1000000;
+
+    const subtotal =
+      Math.round(
+        quantidade * precoUnitarioLiquido * 100
+      ) / 100;
+
+    const mapped = {
+      insumoId: item.insumoId || null,
+      quantidade,
+      precoUnitario,
+      descontoValor,
+      precoUnitarioLiquido,
+      subtotal,
+
+      // Compatibilidade temporÃ¡ria.
+      valorUnitario: precoUnitario,
+    };
+
+    if (numero(item.precoEmbalagem) > 0) {
+      mapped.precoEmbalagem = numero(item.precoEmbalagem);
+    }
+
+    if (numero(item.qtdEmbalagens) > 0) {
+      mapped.qtdEmbalagens = numero(item.qtdEmbalagens);
+    }
+
+    return mapped;
+  }
+
+  function normalizeItems(items = []) {
+    if (!Array.isArray(items)) return [];
+
+    return items
+      .map(recalcularItem)
+      .filter(item =>
+        item.insumoId &&
+        item.quantidade > 0
+      );
+  }
+
+  function calcularTotal(items = []) {
+    return normalizeItems(items).reduce(
+      (total, item) => total + numero(item.subtotal),
+      0
+    );
+  }
+
+  function calculateTotal(items = []) {
+    return calcularTotal(items);
+  }
+
+  function create(payload = {}) {
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    const compra = {
+      id: payload.id || uuidv4(),
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+
+      // Compatibilidade com Financeiro/modular anterior.
+      valor: total,
+
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      status: 'pendente',
+      lancamentoFinanceiroId: null,
+      recebimentoEstoqueId: null,
+      criadoEm: new Date().toISOString(),
+    };
+
+    data.compras.push(compra);
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function update(id, payload = {}) {
+    const index = list().findIndex(
+      item => String(item.id) === String(id)
+    );
+
+    if (index === -1) {
+      return {
+        sucesso: false,
+        erros: ['Compra nÃ£o encontrada'],
+      };
+    }
+
+    const atual = data.compras[index];
+
+    if (atual.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erros: ['Apenas compras pendentes podem ser editadas'],
+      };
+    }
+
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    data.compras[index] = {
+      ...atual,
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+      valor: total,
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      atualizadoEm: new Date().toISOString(),
+    };
+
+    persist();
+
+    return {
+      sucesso: true,
+      compra: data.compras[index],
+    };
+  }
+
+  function remove(id) {
+    const compra = getById(id);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras pendentes podem ser removidas',
+      };
+    }
+
+    data.compras = list().filter(
+      item => String(item.id) !== String(id)
+    );
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function receberCompra(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Esta compra jÃ¡ foi processada',
+      };
+    }
+
+    const executadas = [];
+
+    for (const item of compra.itens) {
+      const resultado =
+        estoqueService.registrarEntrada({
+          insumoId: item.insumoId,
+          quantidade: item.quantidade,
+          custoUnitario:
+            item.precoUnitarioLiquido ??
+            item.precoUnitario,
+          origem: 'compra',
+          referenciaId: compraId,
+        });
+
+      if (!resultado.ok) {
+        estoqueService
+          .removerEntradasDaCompra(compraId);
+
+        return {
+          sucesso: false,
+          erro: `Erro no estoque: ${resultado.erro}`,
+        };
+      }
+
+      executadas.push(resultado);
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'recebida';
+    data.compras[index].dataRecebimento =
+      new Date().toISOString();
+
+    // Compatibilidade temporÃ¡ria.
+    data.compras[index].recebimentoEstoqueId = compraId;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function estornarRecebimento(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'recebida') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras recebidas podem ser estornadas',
+      };
+    }
+
+    const resultado =
+      estoqueService.removerEntradasDaCompra(compraId);
+
+    if (!resultado.sucesso) {
+      return resultado;
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'pendente';
+    data.compras[index].recebimentoEstoqueId = null;
+
+    delete data.compras[index].dataRecebimento;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function vincularLancamentoFinanceiro(compraId, lancamentoId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = lancamentoId;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function desvincularLancamentoFinanceiro(compraId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = null;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function persist() {
+    saveToStorage({
+      compras: data.compras,
+    });
+  }
+
+  return {
+    list,
+    getById,
+    validar,
+    recalcularItem,
+    normalizeItems,
+    calcularTotal,
+    calculateTotal,
+    create,
+    update,
+    remove,
+    receberCompra,
+    estornarRecebimento,
+    vincularLancamentoFinanceiro,
+    desvincularLancamentoFinanceiro,
+  };
+}
+
+============================================================
+FILE: C:\Users\pc_fa\Documents\Projeto_GPT_Plus\.auditoria\PosRelease\P4_3C_20260827_212430\deploy\services\comprasService.js
+============================================================
+import { v4 as uuidv4 } from './uuid.js';
+import { saveToStorage } from './storage.js';
+
+function numero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function createComprasService(data) {
+  if (!Array.isArray(data.compras)) {
+    data.compras = [];
+  }
+
+  function list() {
+    return data.compras;
+  }
+
+  function getById(id) {
+    return list().find(
+      item => String(item.id) === String(id)
+    ) || null;
+  }
+
+  function validar(payload = {}) {
+    const erros = [];
+
+    if (!payload.fornecedorId) {
+      erros.push('Fornecedor Ã© obrigatÃ³rio');
+    }
+
+    if (!payload.data) {
+      erros.push('Data Ã© obrigatÃ³ria');
+    }
+
+    if (
+      !Array.isArray(payload.itens) ||
+      payload.itens.length === 0
+    ) {
+      erros.push('Adicione pelo menos um item');
+    }
+
+    (payload.itens || []).forEach((item, index) => {
+      if (!item.insumoId) {
+        erros.push(`Item ${index + 1}: Insumo obrigatÃ³rio`);
+      }
+
+      if (!numero(item.quantidade) || numero(item.quantidade) <= 0) {
+        erros.push(`Item ${index + 1}: Quantidade invÃ¡lida`);
+      }
+
+      const preco =
+        item.precoUnitario !== undefined
+          ? numero(item.precoUnitario)
+          : numero(item.valorUnitario);
+
+      if (preco < 0) {
+        erros.push(`Item ${index + 1}: PreÃ§o invÃ¡lido`);
+      }
+    });
+
+    return erros;
+  }
+
+  function recalcularItem(item = {}) {
+    const quantidade = numero(item.quantidade);
+
+    const precoUnitario =
+      item.precoUnitario !== undefined
+        ? numero(item.precoUnitario)
+        : numero(item.valorUnitario);
+
+    const descontoValor =
+      Math.max(0, numero(item.descontoValor));
+
+    const descontoUnitario =
+      descontoValor > 0 && quantidade > 0
+        ? descontoValor / quantidade
+        : 0;
+
+    const precoUnitarioLiquido =
+      Math.round(
+        (precoUnitario - descontoUnitario) * 1000000
+      ) / 1000000;
+
+    const subtotal =
+      Math.round(
+        quantidade * precoUnitarioLiquido * 100
+      ) / 100;
+
+    const mapped = {
+      insumoId: item.insumoId || null,
+      quantidade,
+      precoUnitario,
+      descontoValor,
+      precoUnitarioLiquido,
+      subtotal,
+
+      // Compatibilidade temporÃ¡ria.
+      valorUnitario: precoUnitario,
+    };
+
+    if (numero(item.precoEmbalagem) > 0) {
+      mapped.precoEmbalagem = numero(item.precoEmbalagem);
+    }
+
+    if (numero(item.qtdEmbalagens) > 0) {
+      mapped.qtdEmbalagens = numero(item.qtdEmbalagens);
+    }
+
+    return mapped;
+  }
+
+  function normalizeItems(items = []) {
+    if (!Array.isArray(items)) return [];
+
+    return items
+      .map(recalcularItem)
+      .filter(item =>
+        item.insumoId &&
+        item.quantidade > 0
+      );
+  }
+
+  function calcularTotal(items = []) {
+    return normalizeItems(items).reduce(
+      (total, item) => total + numero(item.subtotal),
+      0
+    );
+  }
+
+  function calculateTotal(items = []) {
+    return calcularTotal(items);
+  }
+
+  function create(payload = {}) {
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    const compra = {
+      id: payload.id || uuidv4(),
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+
+      // Compatibilidade com Financeiro/modular anterior.
+      valor: total,
+
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      status: 'pendente',
+      lancamentoFinanceiroId: null,
+      recebimentoEstoqueId: null,
+      criadoEm: new Date().toISOString(),
+    };
+
+    data.compras.push(compra);
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function update(id, payload = {}) {
+    const index = list().findIndex(
+      item => String(item.id) === String(id)
+    );
+
+    if (index === -1) {
+      return {
+        sucesso: false,
+        erros: ['Compra nÃ£o encontrada'],
+      };
+    }
+
+    const atual = data.compras[index];
+
+    if (atual.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erros: ['Apenas compras pendentes podem ser editadas'],
+      };
+    }
+
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    data.compras[index] = {
+      ...atual,
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+      valor: total,
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      atualizadoEm: new Date().toISOString(),
+    };
+
+    persist();
+
+    return {
+      sucesso: true,
+      compra: data.compras[index],
+    };
+  }
+
+  function remove(id) {
+    const compra = getById(id);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras pendentes podem ser removidas',
+      };
+    }
+
+    data.compras = list().filter(
+      item => String(item.id) !== String(id)
+    );
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function receberCompra(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Esta compra jÃ¡ foi processada',
+      };
+    }
+
+    const executadas = [];
+
+    for (const item of compra.itens) {
+      const resultado =
+        estoqueService.registrarEntrada({
+          insumoId: item.insumoId,
+          quantidade: item.quantidade,
+          custoUnitario:
+            item.precoUnitarioLiquido ??
+            item.precoUnitario,
+          origem: 'compra',
+          referenciaId: compraId,
+        });
+
+      if (!resultado.ok) {
+        estoqueService
+          .removerEntradasDaCompra(compraId);
+
+        return {
+          sucesso: false,
+          erro: `Erro no estoque: ${resultado.erro}`,
+        };
+      }
+
+      executadas.push(resultado);
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'recebida';
+    data.compras[index].dataRecebimento =
+      new Date().toISOString();
+
+    // Compatibilidade temporÃ¡ria.
+    data.compras[index].recebimentoEstoqueId = compraId;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function estornarRecebimento(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'recebida') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras recebidas podem ser estornadas',
+      };
+    }
+
+    const resultado =
+      estoqueService.removerEntradasDaCompra(compraId);
+
+    if (!resultado.sucesso) {
+      return resultado;
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'pendente';
+    data.compras[index].recebimentoEstoqueId = null;
+
+    delete data.compras[index].dataRecebimento;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function vincularLancamentoFinanceiro(compraId, lancamentoId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = lancamentoId;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function desvincularLancamentoFinanceiro(compraId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = null;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function persist() {
+    saveToStorage({
+      compras: data.compras,
+    });
+  }
+
+  return {
+    list,
+    getById,
+    validar,
+    recalcularItem,
+    normalizeItems,
+    calcularTotal,
+    calculateTotal,
+    create,
+    update,
+    remove,
+    receberCompra,
+    estornarRecebimento,
+    vincularLancamentoFinanceiro,
+    desvincularLancamentoFinanceiro,
+  };
+}
+
+============================================================
+FILE: C:\Users\pc_fa\Documents\Projeto_GPT_Plus\.auditoria\PosRelease\P4_3C_20260827_212735\deploy\services\comprasService.js
+============================================================
+import { v4 as uuidv4 } from './uuid.js';
+import { saveToStorage } from './storage.js';
+
+function numero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function createComprasService(data) {
+  if (!Array.isArray(data.compras)) {
+    data.compras = [];
+  }
+
+  function list() {
+    return data.compras;
+  }
+
+  function getById(id) {
+    return list().find(
+      item => String(item.id) === String(id)
+    ) || null;
+  }
+
+  function validar(payload = {}) {
+    const erros = [];
+
+    if (!payload.fornecedorId) {
+      erros.push('Fornecedor Ã© obrigatÃ³rio');
+    }
+
+    if (!payload.data) {
+      erros.push('Data Ã© obrigatÃ³ria');
+    }
+
+    if (
+      !Array.isArray(payload.itens) ||
+      payload.itens.length === 0
+    ) {
+      erros.push('Adicione pelo menos um item');
+    }
+
+    (payload.itens || []).forEach((item, index) => {
+      if (!item.insumoId) {
+        erros.push(`Item ${index + 1}: Insumo obrigatÃ³rio`);
+      }
+
+      if (!numero(item.quantidade) || numero(item.quantidade) <= 0) {
+        erros.push(`Item ${index + 1}: Quantidade invÃ¡lida`);
+      }
+
+      const preco =
+        item.precoUnitario !== undefined
+          ? numero(item.precoUnitario)
+          : numero(item.valorUnitario);
+
+      if (preco < 0) {
+        erros.push(`Item ${index + 1}: PreÃ§o invÃ¡lido`);
+      }
+    });
+
+    return erros;
+  }
+
+  function recalcularItem(item = {}) {
+    const quantidade = numero(item.quantidade);
+
+    const precoUnitario =
+      item.precoUnitario !== undefined
+        ? numero(item.precoUnitario)
+        : numero(item.valorUnitario);
+
+    const descontoValor =
+      Math.max(0, numero(item.descontoValor));
+
+    const descontoUnitario =
+      descontoValor > 0 && quantidade > 0
+        ? descontoValor / quantidade
+        : 0;
+
+    const precoUnitarioLiquido =
+      Math.round(
+        (precoUnitario - descontoUnitario) * 1000000
+      ) / 1000000;
+
+    const subtotal =
+      Math.round(
+        quantidade * precoUnitarioLiquido * 100
+      ) / 100;
+
+    const mapped = {
+      insumoId: item.insumoId || null,
+      quantidade,
+      precoUnitario,
+      descontoValor,
+      precoUnitarioLiquido,
+      subtotal,
+
+      // Compatibilidade temporÃ¡ria.
+      valorUnitario: precoUnitario,
+    };
+
+    if (numero(item.precoEmbalagem) > 0) {
+      mapped.precoEmbalagem = numero(item.precoEmbalagem);
+    }
+
+    if (numero(item.qtdEmbalagens) > 0) {
+      mapped.qtdEmbalagens = numero(item.qtdEmbalagens);
+    }
+
+    return mapped;
+  }
+
+  function normalizeItems(items = []) {
+    if (!Array.isArray(items)) return [];
+
+    return items
+      .map(recalcularItem)
+      .filter(item =>
+        item.insumoId &&
+        item.quantidade > 0
+      );
+  }
+
+  function calcularTotal(items = []) {
+    return normalizeItems(items).reduce(
+      (total, item) => total + numero(item.subtotal),
+      0
+    );
+  }
+
+  function calculateTotal(items = []) {
+    return calcularTotal(items);
+  }
+
+  function create(payload = {}) {
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    const compra = {
+      id: payload.id || uuidv4(),
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+
+      // Compatibilidade com Financeiro/modular anterior.
+      valor: total,
+
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      status: 'pendente',
+      lancamentoFinanceiroId: null,
+      recebimentoEstoqueId: null,
+      criadoEm: new Date().toISOString(),
+    };
+
+    data.compras.push(compra);
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function update(id, payload = {}) {
+    const index = list().findIndex(
+      item => String(item.id) === String(id)
+    );
+
+    if (index === -1) {
+      return {
+        sucesso: false,
+        erros: ['Compra nÃ£o encontrada'],
+      };
+    }
+
+    const atual = data.compras[index];
+
+    if (atual.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erros: ['Apenas compras pendentes podem ser editadas'],
+      };
+    }
+
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    data.compras[index] = {
+      ...atual,
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+      valor: total,
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      atualizadoEm: new Date().toISOString(),
+    };
+
+    persist();
+
+    return {
+      sucesso: true,
+      compra: data.compras[index],
+    };
+  }
+
+  function remove(id) {
+    const compra = getById(id);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras pendentes podem ser removidas',
+      };
+    }
+
+    data.compras = list().filter(
+      item => String(item.id) !== String(id)
+    );
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function receberCompra(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Esta compra jÃ¡ foi processada',
+      };
+    }
+
+    const executadas = [];
+
+    for (const item of compra.itens) {
+      const resultado =
+        estoqueService.registrarEntrada({
+          insumoId: item.insumoId,
+          quantidade: item.quantidade,
+          custoUnitario:
+            item.precoUnitarioLiquido ??
+            item.precoUnitario,
+          origem: 'compra',
+          referenciaId: compraId,
+        });
+
+      if (!resultado.ok) {
+        estoqueService
+          .removerEntradasDaCompra(compraId);
+
+        return {
+          sucesso: false,
+          erro: `Erro no estoque: ${resultado.erro}`,
+        };
+      }
+
+      executadas.push(resultado);
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'recebida';
+    data.compras[index].dataRecebimento =
+      new Date().toISOString();
+
+    // Compatibilidade temporÃ¡ria.
+    data.compras[index].recebimentoEstoqueId = compraId;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function estornarRecebimento(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'recebida') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras recebidas podem ser estornadas',
+      };
+    }
+
+    const resultado =
+      estoqueService.removerEntradasDaCompra(compraId);
+
+    if (!resultado.sucesso) {
+      return resultado;
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'pendente';
+    data.compras[index].recebimentoEstoqueId = null;
+
+    delete data.compras[index].dataRecebimento;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function vincularLancamentoFinanceiro(compraId, lancamentoId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = lancamentoId;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function desvincularLancamentoFinanceiro(compraId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = null;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function persist() {
+    saveToStorage({
+      compras: data.compras,
+    });
+  }
+
+  return {
+    list,
+    getById,
+    validar,
+    recalcularItem,
+    normalizeItems,
+    calcularTotal,
+    calculateTotal,
+    create,
+    update,
+    remove,
+    receberCompra,
+    estornarRecebimento,
+    vincularLancamentoFinanceiro,
+    desvincularLancamentoFinanceiro,
+  };
+}
+
+============================================================
+FILE: C:\Users\pc_fa\Documents\Projeto_GPT_Plus\.auditoria\PosRelease\P4_3C_20260827_213002\deploy\services\comprasService.js
+============================================================
+import { v4 as uuidv4 } from './uuid.js';
+import { saveToStorage } from './storage.js';
+
+function numero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function createComprasService(data) {
+  if (!Array.isArray(data.compras)) {
+    data.compras = [];
+  }
+
+  function list() {
+    return data.compras;
+  }
+
+  function getById(id) {
+    return list().find(
+      item => String(item.id) === String(id)
+    ) || null;
+  }
+
+  function validar(payload = {}) {
+    const erros = [];
+
+    if (!payload.fornecedorId) {
+      erros.push('Fornecedor Ã© obrigatÃ³rio');
+    }
+
+    if (!payload.data) {
+      erros.push('Data Ã© obrigatÃ³ria');
+    }
+
+    if (
+      !Array.isArray(payload.itens) ||
+      payload.itens.length === 0
+    ) {
+      erros.push('Adicione pelo menos um item');
+    }
+
+    (payload.itens || []).forEach((item, index) => {
+      if (!item.insumoId) {
+        erros.push(`Item ${index + 1}: Insumo obrigatÃ³rio`);
+      }
+
+      if (!numero(item.quantidade) || numero(item.quantidade) <= 0) {
+        erros.push(`Item ${index + 1}: Quantidade invÃ¡lida`);
+      }
+
+      const preco =
+        item.precoUnitario !== undefined
+          ? numero(item.precoUnitario)
+          : numero(item.valorUnitario);
+
+      if (preco < 0) {
+        erros.push(`Item ${index + 1}: PreÃ§o invÃ¡lido`);
+      }
+    });
+
+    return erros;
+  }
+
+  function recalcularItem(item = {}) {
+    const quantidade = numero(item.quantidade);
+
+    const precoUnitario =
+      item.precoUnitario !== undefined
+        ? numero(item.precoUnitario)
+        : numero(item.valorUnitario);
+
+    const descontoValor =
+      Math.max(0, numero(item.descontoValor));
+
+    const descontoUnitario =
+      descontoValor > 0 && quantidade > 0
+        ? descontoValor / quantidade
+        : 0;
+
+    const precoUnitarioLiquido =
+      Math.round(
+        (precoUnitario - descontoUnitario) * 1000000
+      ) / 1000000;
+
+    const subtotal =
+      Math.round(
+        quantidade * precoUnitarioLiquido * 100
+      ) / 100;
+
+    const mapped = {
+      insumoId: item.insumoId || null,
+      quantidade,
+      precoUnitario,
+      descontoValor,
+      precoUnitarioLiquido,
+      subtotal,
+
+      // Compatibilidade temporÃ¡ria.
+      valorUnitario: precoUnitario,
+    };
+
+    if (numero(item.precoEmbalagem) > 0) {
+      mapped.precoEmbalagem = numero(item.precoEmbalagem);
+    }
+
+    if (numero(item.qtdEmbalagens) > 0) {
+      mapped.qtdEmbalagens = numero(item.qtdEmbalagens);
+    }
+
+    return mapped;
+  }
+
+  function normalizeItems(items = []) {
+    if (!Array.isArray(items)) return [];
+
+    return items
+      .map(recalcularItem)
+      .filter(item =>
+        item.insumoId &&
+        item.quantidade > 0
+      );
+  }
+
+  function calcularTotal(items = []) {
+    return normalizeItems(items).reduce(
+      (total, item) => total + numero(item.subtotal),
+      0
+    );
+  }
+
+  function calculateTotal(items = []) {
+    return calcularTotal(items);
+  }
+
+  function create(payload = {}) {
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    const compra = {
+      id: payload.id || uuidv4(),
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+
+      // Compatibilidade com Financeiro/modular anterior.
+      valor: total,
+
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      status: 'pendente',
+      lancamentoFinanceiroId: null,
+      recebimentoEstoqueId: null,
+      criadoEm: new Date().toISOString(),
+    };
+
+    data.compras.push(compra);
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function update(id, payload = {}) {
+    const index = list().findIndex(
+      item => String(item.id) === String(id)
+    );
+
+    if (index === -1) {
+      return {
+        sucesso: false,
+        erros: ['Compra nÃ£o encontrada'],
+      };
+    }
+
+    const atual = data.compras[index];
+
+    if (atual.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erros: ['Apenas compras pendentes podem ser editadas'],
+      };
+    }
+
+    const itens = normalizeItems(payload.itens || []);
+
+    const erros = validar({
+      ...payload,
+      itens,
+    });
+
+    if (erros.length) {
+      return {
+        sucesso: false,
+        erros,
+      };
+    }
+
+    const total = calcularTotal(itens);
+
+    data.compras[index] = {
+      ...atual,
+      fornecedorId: payload.fornecedorId,
+      data: payload.data,
+      itens,
+      total,
+      valor: total,
+      formaPagamento: payload.formaPagamento || '',
+      observacoes: String(payload.observacoes || '').trim(),
+      atualizadoEm: new Date().toISOString(),
+    };
+
+    persist();
+
+    return {
+      sucesso: true,
+      compra: data.compras[index],
+    };
+  }
+
+  function remove(id) {
+    const compra = getById(id);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras pendentes podem ser removidas',
+      };
+    }
+
+    data.compras = list().filter(
+      item => String(item.id) !== String(id)
+    );
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function receberCompra(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'pendente') {
+      return {
+        sucesso: false,
+        erro: 'Esta compra jÃ¡ foi processada',
+      };
+    }
+
+    const executadas = [];
+
+    for (const item of compra.itens) {
+      const resultado =
+        estoqueService.registrarEntrada({
+          insumoId: item.insumoId,
+          quantidade: item.quantidade,
+          custoUnitario:
+            item.precoUnitarioLiquido ??
+            item.precoUnitario,
+          origem: 'compra',
+          referenciaId: compraId,
+        });
+
+      if (!resultado.ok) {
+        estoqueService
+          .removerEntradasDaCompra(compraId);
+
+        return {
+          sucesso: false,
+          erro: `Erro no estoque: ${resultado.erro}`,
+        };
+      }
+
+      executadas.push(resultado);
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'recebida';
+    data.compras[index].dataRecebimento =
+      new Date().toISOString();
+
+    // Compatibilidade temporÃ¡ria.
+    data.compras[index].recebimentoEstoqueId = compraId;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function estornarRecebimento(compraId, estoqueService) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    if (compra.status !== 'recebida') {
+      return {
+        sucesso: false,
+        erro: 'Apenas compras recebidas podem ser estornadas',
+      };
+    }
+
+    const resultado =
+      estoqueService.removerEntradasDaCompra(compraId);
+
+    if (!resultado.sucesso) {
+      return resultado;
+    }
+
+    const index = list().findIndex(
+      item => String(item.id) === String(compraId)
+    );
+
+    data.compras[index].status = 'pendente';
+    data.compras[index].recebimentoEstoqueId = null;
+
+    delete data.compras[index].dataRecebimento;
+
+    persist();
+
+    return { sucesso: true };
+  }
+
+  function vincularLancamentoFinanceiro(compraId, lancamentoId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = lancamentoId;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function desvincularLancamentoFinanceiro(compraId) {
+    const compra = getById(compraId);
+
+    if (!compra) {
+      return {
+        sucesso: false,
+        erro: 'Compra nÃ£o encontrada',
+      };
+    }
+
+    compra.lancamentoFinanceiroId = null;
+    persist();
+
+    return {
+      sucesso: true,
+      compra,
+    };
+  }
+
+  function persist() {
+    saveToStorage({
+      compras: data.compras,
+    });
+  }
+
+  return {
+    list,
+    getById,
+    validar,
+    recalcularItem,
+    normalizeItems,
+    calcularTotal,
+    calculateTotal,
+    create,
+    update,
+    remove,
+    receberCompra,
+    estornarRecebimento,
+    vincularLancamentoFinanceiro,
+    desvincularLancamentoFinanceiro,
+  };
+}
+
+============================================================
+FILE: C:\Users\pc_fa\Documents\Projeto_GPT_Plus\.auditoria\PosRelease\P4_3C_20260827_213500\deploy\services\comprasService.js
